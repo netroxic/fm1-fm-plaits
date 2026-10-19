@@ -7,7 +7,7 @@ on: [push, workflow_dispatch]
 jobs:
   build:
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -26,15 +26,14 @@ jobs:
 
       - name: Install the JieLi PI32v2 toolchain
         shell: pwsh
-        timeout-minutes: 20
+        timeout-minutes: 30
         run: |
-          $want = (Get-Content sdk/manifest.json -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json).external_toolchain.files.'bin/clang.exe'
-          if (!$want) { $want = (Get-Content (Join-Path $env:FM1_ROOT 'sdk/manifest.json') -Raw | ConvertFrom-Json).external_toolchain.files.'bin/clang.exe' }
-          function Find-Toolchain {
+          $want = (Get-Content (Join-Path $env:FM1_ROOT 'sdk/manifest.json') -Raw | ConvertFrom-Json).external_toolchain.files.'bin/clang.exe'
+          function Find-Toolchain([string[]]$bases) {
             $found = @()
-            foreach ($base in @("$env:RUNNER_TEMP\jl", 'C:\JL', 'C:\Program Files', 'C:\Program Files (x86)', $env:LOCALAPPDATA, $env:APPDATA)) {
+            foreach ($base in $bases) {
               if (!$base -or !(Test-Path $base)) { continue }
-              $found += Get-ChildItem $base -Recurse -Depth 8 -Filter clang.exe -ErrorAction SilentlyContinue |
+              $found += Get-ChildItem $base -Recurse -Depth 10 -Filter clang.exe -ErrorAction SilentlyContinue |
                 Where-Object { Test-Path (Join-Path $_.DirectoryName 'pi32v2-ld.exe') }
             }
             foreach ($c in $found) {
@@ -45,24 +44,42 @@ jobs:
             if ($found) { return (Split-Path $found[0].DirectoryName) }
             return $null
           }
-          Invoke-WebRequest 'https://pkgman.jieliapp.com/s/win-toolchain' -OutFile "$env:RUNNER_TEMP\jl-toolchain.exe" -MaximumRedirection 10
-          $file = "$env:RUNNER_TEMP\jl-toolchain.exe"
-          Write-Host ("Downloaded {0:N0} bytes" -f (Get-Item $file).Length)
-          # 1) Many installers are plain archives: try extracting first.
-          & 7z x $file "-o$env:RUNNER_TEMP\jl" -y | Out-Null
-          $tc = Find-Toolchain
+          $exe = "$env:RUNNER_TEMP\jl-toolchain.exe"
+          $t = [Diagnostics.Stopwatch]::StartNew()
+          Invoke-WebRequest 'https://pkgman.jieliapp.com/s/win-toolchain' -OutFile $exe -MaximumRedirection 10
+          Write-Host ("Downloaded {0:N0} bytes in {1:N0} s" -f (Get-Item $exe).Length, $t.Elapsed.TotalSeconds)
+
+          # 1) Unpack the Inno Setup installer without running it.
+          $x = "$env:RUNNER_TEMP\jlx"
+          choco install innoextract -y --no-progress | Out-Null
+          $ie = (Get-Command innoextract -ErrorAction SilentlyContinue).Source
+          if ($ie) {
+            & $ie --version | Select-Object -First 1
+            & $ie --info $exe 2>&1 | Select-Object -First 20
+            & $ie -e -s -d $x $exe 2>&1 | Select-Object -Last 15
+          }
+          $tc = Find-Toolchain @($x)
+
+          # 2) Otherwise run the installer silently with a log (max 8 minutes).
           if (!$tc) {
-            # 2) Otherwise run the installer silently (Inno Setup / NSIS flags).
-            $p = Start-Process $file -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-','/S' -PassThru
-            if (!$p.WaitForExit(900000)) { $p.Kill(); Write-Host 'Installer timed out' }
-            $tc = Find-Toolchain
+            $log = "$env:RUNNER_TEMP\jl-setup.log"
+            $p = Start-Process $exe -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-','/NOCANCEL','/DIR=C:\JL',"/LOG=$log" -PassThru
+            if (!$p.WaitForExit(480000)) { Write-Host 'Installer still running after 8 min: stopping it'; $p.Kill() }
+            if (Test-Path $log) { Write-Host '---- installer log (last 60 lines) ----'; Get-Content $log -Tail 60 }
+            $tc = Find-Toolchain @('C:\JL', 'C:\Program Files', 'C:\Program Files (x86)', $env:LOCALAPPDATA, $env:APPDATA)
           }
           if (!$tc) {
-            Get-ChildItem "$env:RUNNER_TEMP\jl", 'C:\JL' -Recurse -Depth 3 -ErrorAction SilentlyContinue | Select-Object -First 80 | ForEach-Object { $_.FullName }
-            throw 'JieLi toolchain (bin\clang.exe + bin\pi32v2-ld.exe) not found after install.'
+            Write-Host '---- unpacked files containing clang / ld / bin ----'
+            Get-ChildItem $x -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.FullName -match 'clang|ld\.exe|\\bin\\' } |
+              Select-Object -First 60 | ForEach-Object { $_.FullName }
+            Write-Host '---- top of unpacked tree ----'
+            Get-ChildItem $x -Recurse -Depth 2 -ErrorAction SilentlyContinue | Select-Object -First 60 | ForEach-Object { $_.FullName }
+            Write-Host '---- C:\JL ----'
+            Get-ChildItem 'C:\JL' -Recurse -Depth 2 -ErrorAction SilentlyContinue | Select-Object -First 40 | ForEach-Object { $_.FullName }
+            throw 'JieLi toolchain not found. Send the lines above to Claude.'
           }
           Write-Host "Toolchain: $tc"
-          & "$tc\bin\clang.exe" --version
+          $global:LASTEXITCODE = 0
           "FM1_PI32_TOOLCHAIN=$tc" >> $env:GITHUB_ENV
 
       - name: Build firmware and updater page
