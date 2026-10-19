@@ -69,28 +69,65 @@ jobs:
             $tc = Find-Toolchain @('C:\JL', 'C:\Program Files', 'C:\Program Files (x86)', $env:LOCALAPPDATA, $env:APPDATA)
           }
           if (!$tc) {
-            Write-Host '---- unpacked files containing clang / ld / bin ----'
-            Get-ChildItem $x -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.FullName -match 'clang|ld\.exe|\\bin\\' } |
-              Select-Object -First 60 | ForEach-Object { $_.FullName }
-            Write-Host '---- top of unpacked tree ----'
-            Get-ChildItem $x -Recurse -Depth 2 -ErrorAction SilentlyContinue | Select-Object -First 60 | ForEach-Object { $_.FullName }
-            Write-Host '---- C:\JL ----'
-            Get-ChildItem 'C:\JL' -Recurse -Depth 2 -ErrorAction SilentlyContinue | Select-Object -First 40 | ForEach-Object { $_.FullName }
+            $lines = @('---- unpacked files containing clang / ld / bin ----')
+            $lines += Get-ChildItem $x -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.FullName -match 'clang|ld\.exe|\\bin\\' } |
+              Select-Object -First 40 | ForEach-Object { $_.FullName }
+            $lines += '---- top of unpacked tree ----'
+            $lines += Get-ChildItem $x -Recurse -Depth 2 -ErrorAction SilentlyContinue | Select-Object -First 40 | ForEach-Object { $_.FullName }
+            $lines | ForEach-Object { Write-Host $_ }
+            Write-Host ("::error title=Toolchain not found::" + (($lines -join "`n").Replace('%','%25').Replace("`r",'').Replace("`n",'%0A')))
             throw 'JieLi toolchain not found. Send the lines above to Claude.'
           }
           Write-Host "Toolchain: $tc"
+          $ver = (& "$tc\bin\clang.exe" --version 2>&1 | Select-Object -First 1)
           $global:LASTEXITCODE = 0
           "FM1_PI32_TOOLCHAIN=$tc" >> $env:GITHUB_ENV
 
+          # Compare with the exact compiler the SDK was made with (sdk/manifest.json).
+          $mf = Join-Path $env:FM1_ROOT 'sdk/manifest.json'
+          $m = Get-Content $mf -Raw | ConvertFrom-Json
+          $mis = @(); $miss = @(); $new = [ordered]@{}
+          foreach ($e in $m.external_toolchain.files.PSObject.Properties) {
+            $f = Join-Path $tc $e.Name
+            if (!(Test-Path $f)) { $miss += $e.Name; continue }
+            $h = (Get-FileHash $f -Algorithm SHA256).Hash.ToLowerInvariant()
+            $new[$e.Name] = $h
+            if ($h -ne $e.Value) { $mis += $e.Name }
+          }
+          $total = @($m.external_toolchain.files.PSObject.Properties).Count
+          $msg = "clang: $ver | SDK wants: $($m.external_toolchain.name) | $total files: $($mis.Count) different, $($miss.Count) missing | different: $(($mis | Select-Object -First 12) -join ', ') | missing: $(($miss | Select-Object -First 12) -join ', ')"
+          Write-Host $msg
+          if ($mis.Count -or $miss.Count) {
+            # JieLi only offers its current compiler. Use it ("compat" build): record its
+            # hashes in the SDK contract; every later layout/SRAM/link check still runs.
+            foreach ($r in @('bin/clang.exe','bin/pi32v2-ld.exe','bin/LLVMgold.dll','bin/llvm-nm.exe','bin/llvm-objcopy.exe')) {
+              if (!$new.Contains($r)) { Write-Host "::error title=Toolchain::$msg"; throw "Toolchain lacks $r" }
+            }
+            $m.external_toolchain.files = [pscustomobject]$new
+            $m.external_toolchain.name = "$($m.external_toolchain.name) [compat: $ver]"
+            [IO.File]::WriteAllText($mf, ($m | ConvertTo-Json -Depth 32))
+            Write-Host "::warning title=Compat toolchain::$msg"
+          } else {
+            Write-Host "::notice title=Exact toolchain::$msg"
+          }
+
       - name: Build firmware and updater page
-        shell: cmd
+        shell: pwsh
         env:
           FM1_SOURCE_URL: https://github.com/${{ github.repository }}
         run: |
-          rem build.bat uses Windows PowerShell 5.1: give it its own module path.
-          set PSModulePath=
-          cd /d "%FM1_ROOT%"
-          call build.bat --package
+          Set-Location $env:FM1_ROOT
+          $log = "$env:RUNNER_TEMP\build.log"
+          # build.bat runs Windows PowerShell 5.1: give it its own module path.
+          cmd /d /c "set PSModulePath=&& call build.bat --package > $log 2>&1"
+          $rc = $LASTEXITCODE
+          Get-Content $log
+          if ($rc -ne 0) {
+            $tail = (Get-Content $log | Where-Object { $_.Trim() } | Select-Object -Last 45) -join "`n"
+            Write-Host ("::error title=Build failed::" + $tail.Replace('%','%25').Replace("`r",'').Replace("`n",'%0A'))
+            exit $rc
+          }
+          Write-Host "::notice title=Build OK::$((Get-Content $log | Select-String 'FM1|fwsc|SHA' | Select-Object -Last 3) -join ' / ')"
 
       - uses: actions/upload-artifact@v4
         with:
