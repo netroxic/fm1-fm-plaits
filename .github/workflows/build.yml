@@ -1,1 +1,84 @@
+# Builds the Generative FM-PLAITS firmware for the M-VAVE FM-1 on GitHub's
+# free Windows machines. Upload FM1_FM_PLAITS_v1_source.zip to the repository
+# (or the unzipped source), add this file, and download the result from
+# Actions -> latest run -> Artifacts -> FM1-FM-PLAITS-firmware.
+name: Build FM-1 firmware
+on: [push, workflow_dispatch]
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
 
+      - name: Find the source
+        shell: pwsh
+        run: |
+          if (Test-Path build.bat) { $root = (Get-Location).Path }
+          else {
+            $zip = Get-ChildItem -Filter *.zip | Select-Object -First 1
+            if (!$zip) { throw 'Upload FM1_FM_PLAITS_v1_source.zip to the repository first.' }
+            Expand-Archive $zip.FullName -DestinationPath src
+            $root = (Get-ChildItem src -Recurse -Filter build.bat | Select-Object -First 1).DirectoryName
+          }
+          Write-Host "Source: $root"
+          "FM1_ROOT=$root" >> $env:GITHUB_ENV
+
+      - name: Install the JieLi PI32v2 toolchain
+        shell: pwsh
+        timeout-minutes: 20
+        run: |
+          $want = (Get-Content sdk/manifest.json -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json).external_toolchain.files.'bin/clang.exe'
+          if (!$want) { $want = (Get-Content (Join-Path $env:FM1_ROOT 'sdk/manifest.json') -Raw | ConvertFrom-Json).external_toolchain.files.'bin/clang.exe' }
+          function Find-Toolchain {
+            $found = @()
+            foreach ($base in @("$env:RUNNER_TEMP\jl", 'C:\JL', 'C:\Program Files', 'C:\Program Files (x86)', $env:LOCALAPPDATA, $env:APPDATA)) {
+              if (!$base -or !(Test-Path $base)) { continue }
+              $found += Get-ChildItem $base -Recurse -Depth 8 -Filter clang.exe -ErrorAction SilentlyContinue |
+                Where-Object { Test-Path (Join-Path $_.DirectoryName 'pi32v2-ld.exe') }
+            }
+            foreach ($c in $found) {
+              $h = (Get-FileHash $c.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+              Write-Host "candidate $($c.FullName) $h"
+              if ($h -eq $want) { return (Split-Path $c.DirectoryName) }
+            }
+            if ($found) { return (Split-Path $found[0].DirectoryName) }
+            return $null
+          }
+          Invoke-WebRequest 'https://pkgman.jieliapp.com/s/win-toolchain' -OutFile "$env:RUNNER_TEMP\jl-toolchain.exe" -MaximumRedirection 10
+          $file = "$env:RUNNER_TEMP\jl-toolchain.exe"
+          Write-Host ("Downloaded {0:N0} bytes" -f (Get-Item $file).Length)
+          # 1) Many installers are plain archives: try extracting first.
+          & 7z x $file "-o$env:RUNNER_TEMP\jl" -y | Out-Null
+          $tc = Find-Toolchain
+          if (!$tc) {
+            # 2) Otherwise run the installer silently (Inno Setup / NSIS flags).
+            $p = Start-Process $file -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-','/S' -PassThru
+            if (!$p.WaitForExit(900000)) { $p.Kill(); Write-Host 'Installer timed out' }
+            $tc = Find-Toolchain
+          }
+          if (!$tc) {
+            Get-ChildItem "$env:RUNNER_TEMP\jl", 'C:\JL' -Recurse -Depth 3 -ErrorAction SilentlyContinue | Select-Object -First 80 | ForEach-Object { $_.FullName }
+            throw 'JieLi toolchain (bin\clang.exe + bin\pi32v2-ld.exe) not found after install.'
+          }
+          Write-Host "Toolchain: $tc"
+          & "$tc\bin\clang.exe" --version
+          "FM1_PI32_TOOLCHAIN=$tc" >> $env:GITHUB_ENV
+
+      - name: Build firmware and updater page
+        shell: pwsh
+        env:
+          FM1_SOURCE_URL: https://github.com/${{ github.repository }}
+        run: |
+          Set-Location $env:FM1_ROOT
+          .\build.bat --package
+          if ($LASTEXITCODE -ne 0) { throw "build failed ($LASTEXITCODE)" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FM1-FM-PLAITS-firmware
+          path: |
+            ${{ env.FM1_ROOT }}\build\official-web\FM1-Official-Open-Source.html
+            ${{ env.FM1_ROOT }}\build\dx7\generated\FM1_OFFICIAL_OPEN.fwsc
+            ${{ env.FM1_ROOT }}\build\dx7\firmware-report.json
+          if-no-files-found: error
