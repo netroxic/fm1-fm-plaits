@@ -83,13 +83,14 @@ jobs:
           "FM1_PI32_TOOLCHAIN=$tc" >> $env:GITHUB_ENV
 
       - name: Build firmware and updater page
-        shell: pwsh
+        shell: cmd
         env:
           FM1_SOURCE_URL: https://github.com/${{ github.repository }}
         run: |
-          Set-Location $env:FM1_ROOT
-          .\build.bat --package
-          if ($LASTEXITCODE -ne 0) { throw "build failed ($LASTEXITCODE)" }
+          rem build.bat uses Windows PowerShell 5.1: give it its own module path.
+          set PSModulePath=
+          cd /d "%FM1_ROOT%"
+          call build.bat --package
 
       - uses: actions/upload-artifact@v4
         with:
