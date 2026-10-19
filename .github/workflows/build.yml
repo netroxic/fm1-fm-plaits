@@ -4,6 +4,13 @@
 # Actions -> latest run -> Artifacts -> FM1-FM-PLAITS-firmware.
 name: Build FM-1 firmware
 on: [push, workflow_dispatch]
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: false
 jobs:
   build:
     runs-on: windows-latest
@@ -137,3 +144,30 @@ jobs:
             ${{ env.FM1_ROOT }}\build\dx7\generated\FM1_OFFICIAL_OPEN.fwsc
             ${{ env.FM1_ROOT }}\build\dx7\firmware-report.json
           if-no-files-found: error
+
+  # Website (GitHub Pages): site/ plus the freshly built installer page.
+  # Needs Settings > Pages > Source: "GitHub Actions" (one time).
+  pages:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: FM1-FM-PLAITS-firmware
+          path: fw
+      - name: Put the installer and firmware into the site
+        run: |
+          mkdir -p site/install
+          cp "$(find fw -name FM1-Official-Open-Source.html | head -1)" site/install/index.html
+          cp "$(find fw -name FM1_OFFICIAL_OPEN.fwsc | head -1)" site/install/FM1_OFFICIAL_OPEN.fwsc
+          ls -la site site/install
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deploy
+        uses: actions/deploy-pages@v4

@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>FM-PLAITS · Generative Plaits for the M-VAVE FM-1</title>
+<meta name="description" content="FM-PLAITS by @narti_live: sixteen Plaits-style synthesis engines, a low pass gate and a generative melody sequencer, as firmware for the M-VAVE FM-1.">
+<meta name="theme-color" content="#000000">
+<meta property="og:title" content="FM-PLAITS for the M-VAVE FM-1">
+<meta property="og:description" content="A generative Plaits voice for the FM-1, by @narti_live.">
+<meta property="og:image" content="img/sound_string.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&family=IBM+Plex+Mono:wght@400;600&display=swap">
+<style>
+/* One column, like the FM-1's own screen: black, white text, yellow / orange / red accents. */
+:root {
+  --bg: #000; --panel: #0d0d0d; --line: #262626; --text: #f2f2f2; --dim: #8c8c8c;
+  --yellow: #ffd21f; --orange: #ff7a00; --red: #ff3b2f;
+  --pixel: "Silkscreen", ui-monospace, Menlo, monospace;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { background: var(--bg); }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font: 16px/1.6 var(--mono);
+  padding: max(28px, env(safe-area-inset-top)) max(18px, env(safe-area-inset-right)) 56px max(18px, env(safe-area-inset-left));
+}
+main { max-width: 860px; margin: 0 auto; display: flex; flex-direction: column; gap: 44px; }
+a { color: var(--yellow); }
+a:focus-visible, .cta:focus-visible { outline: 2px solid var(--yellow); outline-offset: 3px; }
+
+/* hero: the boot screen, larger */
+.hero { display: flex; flex-direction: column; gap: 10px; padding-top: 12px; }
+.logo { font: 700 clamp(44px, 11vw, 92px)/0.95 var(--pixel); letter-spacing: 0.02em; margin: 0; }
+.logo .dash { color: var(--yellow); }
+.sub { font: 400 clamp(13px, 2.4vw, 16px)/1.3 var(--pixel); color: var(--orange); letter-spacing: 0.12em; text-transform: uppercase; margin: 0; }
+.meter { display: flex; gap: 6px; margin: 6px 0 4px; }
+.meter i { width: 18px; height: 8px; background: var(--line); }
+.meter i:nth-child(-n+2) { background: var(--yellow); }
+.meter i:nth-child(3) { background: var(--orange); }
+.meter i:nth-child(4) { background: var(--red); }
+.by { display: inline-flex; align-items: center; gap: 10px; font: 700 15px/1 var(--pixel); color: var(--yellow); text-decoration: none; letter-spacing: 0.06em; width: fit-content; }
+.by svg { width: 26px; height: 26px; }
+.lede { font-size: 17px; max-width: 64ch; margin: 0; }
+.lede b { color: var(--yellow); font-weight: 600; }
+
+/* screens */
+.screens { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.screens figure { margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.screens img { width: 100%; aspect-ratio: 1; image-rendering: pixelated; display: block; border: 1px solid var(--line); background: #000; }
+.screens figcaption { font: 400 11px/1.2 var(--pixel); color: var(--dim); letter-spacing: 0.08em; text-transform: uppercase; }
+
+/* listen */
+.listen { display: flex; flex-direction: column; gap: 10px; }
+audio { width: 100%; max-width: 520px; filter: invert(1) hue-rotate(180deg) saturate(0.4); }
+
+/* actions */
+.ctas { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; }
+.cta { display: flex; flex-direction: column; gap: 4px; padding: 14px 16px; background: var(--panel); border: 1px solid var(--line); color: var(--text); text-decoration: none; min-width: 0; }
+.cta strong { font: 700 15px/1.2 var(--pixel); letter-spacing: 0.05em; color: var(--yellow); text-transform: uppercase; }
+.cta span { font-size: 13px; color: var(--dim); }
+.cta.primary { border-color: var(--orange); }
+.cta.primary strong { color: var(--orange); }
+.cta:hover { border-color: var(--yellow); }
+
+h2 { font: 700 20px/1.2 var(--pixel); letter-spacing: 0.06em; text-transform: uppercase; margin: 0 0 14px; color: var(--text); }
+h2::before { content: ""; display: inline-block; width: 10px; height: 10px; background: var(--orange); margin-right: 10px; vertical-align: 2px; }
+section p { margin: 0 0 12px; max-width: 66ch; }
+ul.feat { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 10px; }
+ul.feat li { max-width: 70ch; }
+ul.feat b { color: var(--yellow); font-weight: 600; }
+.engines { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.engines span { font: 400 11px/1 var(--pixel); letter-spacing: 0.06em; padding: 6px 8px; border: 1px solid var(--line); color: var(--text); }
+
+.knobs { width: 100%; border-collapse: collapse; font-size: 14px; }
+.knobs th, .knobs td { text-align: left; padding: 7px 10px 7px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+.knobs th { font: 400 12px/1.2 var(--pixel); color: var(--orange); letter-spacing: 0.06em; white-space: nowrap; }
+.table-wrap { overflow-x: auto; }
+
+.note { border-left: 3px solid var(--red); padding: 10px 14px; background: var(--panel); font-size: 14px; color: var(--dim); max-width: 70ch; }
+.note b { color: var(--text); }
+footer { font-size: 12px; color: var(--dim); border-top: 1px solid var(--line); padding-top: 18px; display: flex; flex-direction: column; gap: 6px; }
+footer p { margin: 0; max-width: 80ch; }
+@media (prefers-reduced-motion: no-preference) {
+  .meter i:nth-child(3) { animation: blink 1.6s steps(2) infinite; }
+  @keyframes blink { 50% { background: var(--line); } }
+}
+</style>
+</head>
+<body>
+<main>
+
+<header class="hero">
+  <h1 class="logo">FM<span class="dash">-</span>PLAITS</h1>
+  <div class="meter" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+  <p class="sub">Generative Plaits voice for the M-VAVE FM-1</p>
+  <a class="by" href="https://instagram.com/narti_live" target="_blank" rel="noopener">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none"/></svg>
+    BY @NARTI_LIVE
+  </a>
+</header>
+
+<p class="lede">Sixteen synthesis engines in the spirit of Mutable Instruments <b>Plaits</b>, a <b>low pass gate</b>, a black hole <b>reverb</b>, a ping-pong <b>delay</b> and a <b>generative melody sequencer</b> taken from Narti Live's Max for Live device. Press PLAY and it starts writing melodies. Turn a knob and it follows you.</p>
+
+<div class="screens">
+  <figure><img src="img/sound_string.png" alt="SOUND page: STRING engine with oscilloscope and low pass gate shape" width="240" height="240"><figcaption>Sound · String</figcaption></figure>
+  <figure><img src="img/seq.png" alt="SEQ page: A minor melody, 16 steps" width="240" height="240"><figcaption>Seq</figcaption></figure>
+  <figure><img src="img/reverb.png" alt="REVERB page: black hole reverb tail" width="240" height="240"><figcaption>Reverb</figcaption></figure>
+  <figure><img src="img/delay.png" alt="DELAY page: ping-pong delay taps" width="240" height="240"><figcaption>Delay</figcaption></figure>
+  <figure><img src="img/menu.png" alt="MENU page: MIDI out and LFO drift" width="240" height="240"><figcaption>Menu</figcaption></figure>
+</div>
+
+<div class="listen">
+  <h2>Listen</h2>
+  <audio controls preload="none" src="media/fm-plaits-demo.mp3"></audio>
+</div>
+
+<nav class="ctas" aria-label="Get FM-PLAITS">
+  <a class="cta primary" href="play/"><strong>Play in the browser</strong><span>The same code, running in your browser. Mouse, touch or keyboard.</span></a>
+  <a class="cta primary" href="install/"><strong>Install on your FM-1</strong><span>Chrome or Edge, USB cable. Nothing to install on the computer.</span></a>
+  <a class="cta" href="install/FM1_OFFICIAL_OPEN.fwsc" download><strong>Download .fwsc</strong><span>The firmware file, for M-VAVE's own updater.</span></a>
+  <a class="cta" href="download/FM-PLAITS.apk" download><strong>Android app</strong><span>FM-PLAITS on your phone (APK, Android 8+).</span></a>
+  <a class="cta" href="https://github.com/netroxic/fm1-fm-plaits/blob/main/MANUAL.md"><strong>Manual</strong><span>Every knob, page and button.</span></a>
+  <a class="cta" href="https://github.com/netroxic/fm1-fm-plaits"><strong>Source</strong><span>GitHub. Built on M-VAVE FM1 Open (GPL-3.0).</span></a>
+</nav>
+
+<section>
+  <h2>The voice</h2>
+  <ul class="feat">
+    <li><b>Engines.</b> PRESETS picks one of sixteen. HARMONICS, TIMBRE and MORPH shape it, FREQ moves it by octaves.
+      <div class="engines"><span>VA</span><span>Waveshape</span><span>FM</span><span>Grain</span><span>Additive</span><span>Wavetable</span><span>Chords</span><span>Vowel</span><span>Swarm</span><span>Noise</span><span>Particles</span><span>String</span><span>Modal</span><span>Phase dist</span><span>Terrain</span><span>Chiptune</span></div></li>
+    <li><b>Low pass gate.</b> ALGORITHM is the gate: centre plucks, clockwise rings longer, counter-clockwise swells in slowly.</li>
+    <li><b>Generator.</b> Root, scale, density and length. FX writes a new melody, keys change the root, and EVOLVE mutates it every few bars.</li>
+    <li><b>Groove.</b> Speed from /16 to X1, triplets, a chance knob for how many notes actually play, and slides.</li>
+    <li><b>Space.</b> An eight-line black hole reverb with FREEZE at full decay, and a ping-pong delay locked to the tempo.</li>
+    <li><b>Drift.</b> A random LFO wanders over the sound. Its slowest setting takes about a minute and a half.</li>
+    <li><b>MIDI out.</b> The melody goes out on channel 1, with accents as velocity, plus MIDI clock.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>Knobs</h2>
+  <div class="table-wrap">
+  <table class="knobs">
+    <tr><th>PRESETS</th><td>Sound engine</td></tr>
+    <tr><th>ALGORITHM</th><td>Low pass gate: decay (clockwise) or slow attack (counter-clockwise)</td></tr>
+    <tr><th>SELECT</th><td>Tempo</td></tr>
+    <tr><th>K1 – K4</th><td>The four values at the bottom of the page</td></tr>
+    <tr><th>SEQ</th><td>Next page: Sound, Seq, Groove, Reverb, Delay, Menu</td></tr>
+    <tr><th>HOME</th><td>Back to Sound</td></tr>
+    <tr><th>GLO (hold)</th><td>Mixer</td></tr>
+    <tr><th>SAVE</th><td>Save the project</td></tr>
+  </table>
+  </div>
+</section>
+
+<section>
+  <h2>Install</h2>
+  <p>Back up your projects, DX7 voices and samples in the <a href="https://open.m-vave.com/fm1-workbench" target="_blank" rel="noopener">M-VAVE workbench</a> first. Then open <a href="install/">the installer</a> in Chrome or Edge, connect the FM-1 with a USB data cable straight into the computer, and run the update. Keep the cable in until it says it is done.</p>
+  <p>To go back, the same installer page puts the original M-VAVE V15 firmware back on.</p>
+  <p class="note"><b>Experimental first release.</b> JieLi now only offers a newer compiler than the one M-VAVE used, and with it the original firmware nearly fills the FM-1. To make room, this build leaves out the original editor pages (DX7 FM editor, step and arp editors, preset browser) and the 128 DX7 factory voices. FM-PLAITS, the mixer, project saving, MIDI and Bluetooth are all there.</p>
+</section>
+
+<footer>
+  <p>FM-PLAITS by <a href="https://instagram.com/narti_live" target="_blank" rel="noopener">@narti_live</a>. Synthesis after Mutable Instruments Plaits by Émilie Gillet (MIT). Built on M-VAVE FM1 Open (GPL-3.0 with the FM1 SDK linking exception).</p>
+  <p>M-VAVE and FM-1 are trademarks of their owners. Plaits is a Mutable Instruments design. This project is not affiliated with M-VAVE or Mutable Instruments.</p>
+</footer>
+
+</main>
+</body>
+</html>
