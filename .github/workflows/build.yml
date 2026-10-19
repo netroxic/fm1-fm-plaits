@@ -143,6 +143,7 @@ jobs:
             ${{ env.FM1_ROOT }}\build\official-web\FM1-Official-Open-Source.html
             ${{ env.FM1_ROOT }}\build\dx7\generated\FM1_OFFICIAL_OPEN.fwsc
             ${{ env.FM1_ROOT }}\build\dx7\firmware-report.json
+            ${{ env.FM1_ROOT }}\build\dx7\build-identity.json
           if-no-files-found: error
 
   # Website (GitHub Pages): site/ plus the freshly built installer page.
@@ -161,9 +162,25 @@ jobs:
           path: fw
       - name: Put the installer and firmware into the site
         run: |
-          mkdir -p site/install
-          cp "$(find fw -name FM1-Official-Open-Source.html | head -1)" site/install/index.html
-          cp "$(find fw -name FM1_OFFICIAL_OPEN.fwsc | head -1)" site/install/FM1_OFFICIAL_OPEN.fwsc
+          set -e
+          fwsc="$(find fw -name FM1_OFFICIAL_OPEN.fwsc | head -1)"
+          ident="$(find fw -name build-identity.json | head -1)"
+          cp "$fwsc" site/install/FM-PLAITS.fwsc
+          mkdir -p site/install/workbench
+          cp "$(find fw -name FM1-Official-Open-Source.html | head -1)" site/install/workbench/index.html
+          python3 - "$ident" <<'PY'
+          import hashlib, json, sys, pathlib
+          ident = json.load(open(sys.argv[1], encoding="utf-8-sig"))
+          raw = pathlib.Path("site/install/FM-PLAITS.fwsc").read_bytes()
+          product = "".join(chr((raw[i * 48 + 47] - i - 1) & 255) for i in range(20) if raw[i * 48 + 47] != 0x7D)
+          meta = {"version": "v1 (" + ident["build_id"][:8] + ")", "product": product, "pkg": "FM-PLAITS.fwsc",
+                  "build_id": ident["build_id"], "sha256": hashlib.sha256(raw).hexdigest()}
+          t = pathlib.Path("site/install/index.template.html").read_text(encoding="utf-8")
+          assert t.count("/*META*/") == 1
+          pathlib.Path("site/install/index.html").write_text(t.replace("/*META*/", json.dumps(meta)), encoding="utf-8")
+          pathlib.Path("site/install/index.template.html").unlink()
+          print(meta)
+          PY
           ls -la site site/install
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
